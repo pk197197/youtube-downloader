@@ -264,11 +264,10 @@ def apply_theme():
     
     # ttk Style for Combobox
     s = ttk.Style()
-    s.theme_use('clam') # 'clam' theme is more customizable
+    s.theme_use('clam')
     s.configure('TCombobox', fieldbackground=theme["entry_bg"], background=theme["btn_bg"], foreground=theme["fg"], selectbackground=theme["btn_bg"], selectforeground=theme["fg"])
     s.map('TCombobox', fieldbackground=[('readonly', theme["entry_bg"])], background=[('readonly', theme["btn_bg"])])
     
-    # 递归更新所有支持的主体部件
     def update_widget(parent):
         for widget in parent.winfo_children():
             w_type = widget.winfo_class()
@@ -277,34 +276,32 @@ def apply_theme():
                 widget.config(bg=theme["bg"])
                 update_widget(widget)
             elif w_type == "Label":
-                # 排除一些特殊颜色的 Label (如果以后有)
                 widget.config(bg=theme["bg"], fg=theme["fg"])
             elif w_type == "Button":
-                # 下载按钮由于是红色的，需要特殊处理
+                # 通用按钮样式
+                widget.config(
+                    bg=theme["btn_bg"], 
+                    fg=theme["fg"], 
+                    activebackground=theme["bg"], 
+                    activeforeground=theme["fg"],
+                    highlightbackground=theme["bg"],
+                    highlightthickness=0
+                )
+                # 特殊按钮额外微调
                 if widget == download_btn:
-                    widget.config(highlightbackground=theme["bg"])
-                elif widget == theme_btn:
-                    widget.config(text=theme["btn_text"], bg=theme["bg"], fg="#999999", activebackground=theme["bg"])
-                elif widget == update_btn:
-                    widget.config(bg=theme["bg"], fg="#999999", activebackground=theme["bg"])
-                else:
-                    widget.config(bg=theme["btn_bg"], highlightbackground=theme["bg"], fg=theme["fg"]) # Default button colors
+                    widget.config(bg="#FF0000", fg="black") # 下载按钮始终红色
+                elif widget == theme_btn or widget == update_btn:
+                    widget.config(bg=theme["bg"], fg="#999999", text=theme["btn_text"] if widget == theme_btn else widget.cget("text"))
             elif w_type == "Entry":
-                widget.config(bg=theme["entry_bg"], fg=theme["fg"], highlightbackground=theme["highlight"], insertbackground=theme["fg"])
-            elif w_type == "TCombobox":
-                # Handled by ttk.Style above
-                pass 
-            elif "Text" in w_type: # ScrolledText
+                widget.config(bg=theme["entry_bg"], fg=theme["fg"], highlightbackground=theme["highlight"], insertbackground=theme["fg"], highlightthickness=1)
+            elif "Text" in w_type:
                 widget.config(bg=theme["log_bg"], fg=theme["fg"], highlightbackground=theme["highlight"])
 
     update_widget(window)
-    # 特殊部件由于嵌套原因，手动补一下
-    log_frame.config(bg=theme["bg"])
-    header_frame.config(bg=theme["bg"])
-    content_frame.config(bg=theme["bg"])
-    entry_frame.config(bg=theme["bg"])
-    options_frame.config(bg=theme["bg"])
-    path_frame.config(bg=theme["bg"])
+    # 强制刷新一些关键容器
+    for f in [header_frame, content_frame, entry_frame, options_frame, path_frame, log_frame]:
+        try: f.config(bg=theme["bg"])
+        except: pass
 
 window = tk.Tk()
 window.title("YouTube 极简下载器 v1.1")
