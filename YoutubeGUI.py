@@ -278,20 +278,29 @@ def apply_theme():
             elif w_type == "Label":
                 widget.config(bg=theme["bg"], fg=theme["fg"])
             elif w_type == "Button":
-                # 通用按钮样式
-                widget.config(
-                    bg=theme["btn_bg"], 
-                    fg=theme["fg"], 
-                    activebackground=theme["bg"], 
-                    activeforeground=theme["fg"],
-                    highlightbackground=theme["bg"],
-                    highlightthickness=0
-                )
-                # 特殊按钮额外微调
+                # macOS 兼容性按钮逻辑：使用 highlightbackground 控制颜色
                 if widget == download_btn:
-                    widget.config(bg="#FF0000", fg="black") # 下载按钮始终红色
+                    widget.config(
+                        highlightbackground="#FF0000", # 下载按钮背景
+                        fg="white", # 下载按钮白字更醒目
+                        activebackground="#CC0000"
+                    )
                 elif widget == theme_btn or widget == update_btn:
-                    widget.config(bg=theme["bg"], fg="#999999", text=theme["btn_text"] if widget == theme_btn else widget.cget("text"))
+                    widget.config(
+                        bg=theme["bg"], 
+                        fg="#999999", 
+                        highlightbackground=theme["bg"],
+                        text=theme["btn_text"] if widget == theme_btn else widget.cget("text")
+                    )
+                else:
+                    # 通用按钮（如 粘帖、浏览）
+                    widget.config(
+                        highlightbackground=theme["btn_bg"], # 按钮主体色
+                        fg=theme["fg"], 
+                        activebackground=theme["highlight"]
+                    )
+                # 统一设置
+                widget.config(highlightthickness=3, borderwidth=0) 
             elif w_type == "Entry":
                 widget.config(bg=theme["entry_bg"], fg=theme["fg"], highlightbackground=theme["highlight"], insertbackground=theme["fg"], highlightthickness=1)
             elif "Text" in w_type:
@@ -304,7 +313,7 @@ def apply_theme():
         except: pass
 
 window = tk.Tk()
-window.title("YouTube 极简下载器 v1.1")
+window.title("YouTube 极简下载器 v1.1.1")
 window.geometry("700x1000") # 增加高度，防止内容被遮挡
 window.minsize(600, 600)
 # window.config(bg=BG_COLOR) # Initial config will be handled by apply_theme
