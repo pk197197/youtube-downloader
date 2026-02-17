@@ -7,7 +7,34 @@ import subprocess
 import shutil
 import time
 
-# --- 自动安装 yt-dlp ---
+# --- 全局变量 ---
+yt_dlp = None
+ffmpeg_available = False
+
+# --- 异步初始化 ---
+def init_app():
+    global yt_dlp, ffmpeg_available
+    log("正在初始化核心组件...")
+    
+    # 1. 检查/安装 yt-dlp
+    if not ensure_ytdlp_installed():
+        log("❌ 核心组件 yt-dlp 加载失败，程序无法使用。")
+        return
+
+    import yt_dlp as ydl_module
+    yt_dlp = ydl_module
+    log("✅ 核心组件加载完成。")
+
+    # 2. 检查 FFmpeg
+    ffmpeg_available = shutil.which("ffmpeg") is not None
+    if ffmpeg_available:
+        log("✅ 检测到 FFmpeg 组件，支持高清画质合并。")
+    else:
+        log("⚠️ 未检测到 FFmpeg！")
+        log("👉 后果：无法下载 1080p+ 画质，所有视频将自动降级为兼容格式（通常是 720p 或更低）。")
+        window.after(1000, lambda: messagebox.showwarning("画质受限警告", 
+            "未检测到 FFmpeg 组件！\n\n导致后果：\n1. 无法合并视频流和音频流\n2. 下载的视频画质将受限（通常最高 720p）\n3. 文件大小可能异常小\n\n建议安装 FFmpeg 以解锁 1080p/4k 画质。"))
+
 def ensure_ytdlp_installed():
     # 如果是打包后的环境，直接跳过检查
     if getattr(sys, 'frozen', False):
@@ -15,33 +42,18 @@ def ensure_ytdlp_installed():
             import yt_dlp
             return True
         except ImportError:
-            messagebox.showerror("错误", "内置的 yt-dlp 库丢失，请重新下载软件。")
             return False
 
-    global yt_dlp
     try:
         import yt_dlp
         return True
     except ImportError:
-        print("yt-dlp 未安装，正在尝试自动安装...")
+        log("正在尝试自动修复依赖...")
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp"])
-            import yt_dlp
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp", "--break-system-packages"])
             return True
-        except subprocess.CalledProcessError:
-            print("普通安装失败，尝试 --break-system-packages...")
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp", "--break-system-packages"])
-                import yt_dlp
-                return True
-            except Exception as e:
-                messagebox.showerror("依赖缺失", f"无法自动安装 yt-dlp 库：\n{e}\n请手动运行: pip install yt-dlp --break-system-packages")
-                return False
-        except Exception as e:
-            messagebox.showerror("依赖缺失", f"无法自动安装 yt-dlp 库：\n{e}\n请手动运行: pip install yt-dlp")
+        except:
             return False
-
-ensure_ytdlp_installed()
 
 # --- 日志输出 ---
 def log(message):
@@ -55,16 +67,27 @@ def _append_log(msg):
     log_area.see(tk.END) # 自动滚动到底部
     log_area.config(state='disabled')
 
-# --- 检查 FFmpeg ---
-def check_ffmpeg():
-    return shutil.which("ffmpeg") is not None
-
 def start_download():
+    if yt_dlp is None:
+        messagebox.showwarning("提示", "正在初始化组件，请稍后...")
+        return
+
     url = url_entry.get().strip()
     if not url:
         messagebox.showwarning("提示", "请先粘贴视频链接！")
         return
     
+    # 智能判断：如果未解析直接点下载，自动触发解析并下载最高画质
+    if not quality_var.get():
+        log("检测到未选择画质，正在自动解析并下载最佳画质...")
+        # 这里为了简化逻辑，我们直接用Best配置启动下载任务，跳过手动选择
+        # 但为了用户体验，最好还是走一遍解析流程，或者赋予默认值
+        # 简单方案：赋予默认最高画质
+        download_btn.config(state=tk.DISABLED, text="下载中...")
+        thread = threading.Thread(target=run_download_task, args=(url, "1. 最高画质 (最佳效果)", path_entry.get().strip()))
+        thread.start()
+        return
+
     quality = quality_var.get()
     save_path = path_entry.get().strip()
     if not save_path or not os.path.isdir(save_path):
@@ -78,7 +101,7 @@ def start_download():
     thread.start()
 
 def run_download_task(url, quality, save_path):
-    has_ffmpeg = check_ffmpeg()
+    # has_ffmpeg = check_ffmpeg() # 使用全局变量
     
     ydl_opts = {
         'outtmpl': os.path.join(save_path, '%(title)s.%(ext)s'),
@@ -89,13 +112,13 @@ def run_download_task(url, quality, save_path):
         'logger': MyLogger(), # 捕获 yt-dlp 内部日志
     }
     
-    if not has_ffmpeg:
-        log("⚠️ 未检测到FFmpeg，自动切换到兼容模式（单文件下载）")
+    if not ffmpeg_available:
+        log("⚠️ [兼容模式] 未检测到FFmpeg，将根据可用格式下载")
         if 'merge_output_format' in ydl_opts:
-            del ydl_opts['merge_output_format']
+            del ydl_opts['merge_output_format'] # 没有ffmpeg无法合并，不能指定merge_output_format
 
     if "仅音频" in quality:
-        if has_ffmpeg:
+        if ffmpeg_available:
             ydl_opts.update({
                 'format': 'bestaudio/best',
                 'postprocessors': [{
@@ -106,28 +129,30 @@ def run_download_task(url, quality, save_path):
             })
         else:
              ydl_opts.update({'format': 'bestaudio/best'})
-             window.after(0, lambda: messagebox.showinfo("提示", "未安装FFmpeg，将下载原始音频(m4a/webm)"))
+             window.after(0, lambda: messagebox.showinfo("提示", "无FFmpeg，下载原始音频"))
 
-    elif "最高画质" in quality:
-        if has_ffmpeg:
+    elif "最高画质" in quality or "1." in quality: # 兼容带序号的选项
+        if ffmpeg_available:
             ydl_opts.update({'format': 'bestvideo+bestaudio/best'})
         else:
-            ydl_opts.update({'format': 'best[ext=mp4]/best'})
+            # 没有FFmpeg，强制只能下载 best（通常是720p或更低，已经包含音频的单个文件）
+            ydl_opts.update({'format': 'best'}) 
+            
+    elif "标准画质" in quality: # 旧逻辑兼容
+        ydl_opts.update({'format': 'best[height<=720][ext=mp4]/best[height<=720]'})
 
-    elif "标准画质" in quality and "720p" in quality:
-        if has_ffmpeg:
-            ydl_opts.update({'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]'})
-        else:
-            ydl_opts.update({'format': 'best[height<=720][ext=mp4]/best[height<=720]'})
-
-    elif "(" in quality and ")" in quality: 
+    # 处理带序号的选项 "2. 1080p xxx"
+    elif any(x in quality for x in ["2.", "3.", "4.", "5."]):
         try:
-            res = quality.split("p")[0].strip()
-            if res.isdigit():
-                 if has_ffmpeg:
+            # 提取数字部分，例如 "2. 1080p" -> "1080"
+            import re
+            res_match = re.search(r'(\d+)p', quality)
+            if res_match:
+                res = res_match.group(1)
+                if ffmpeg_available:
                     ydl_opts.update({'format': f'bestvideo[height<={res}]+bestaudio/best[height<={res}]'})
-                 else:
-                    ydl_opts.update({'format': f'best[height<={res}][ext=mp4]'})
+                else:
+                    ydl_opts.update({'format': f'best[height<={res}]'})
         except:
             pass 
 
@@ -147,6 +172,9 @@ class MyLogger:
             # log(f"[内部] {msg}")
             pass
     def warning(self, msg):
+        # 过滤掉一些不影响使用的警告
+        if "challenge" in msg or "AppSupport" in msg:
+            return 
         log(f"⚠️ {msg}")
     def error(self, msg):
         log(f"❌ {msg}")
@@ -155,6 +183,8 @@ def progress_hook(d):
     global last_percent
     if d['status'] == 'downloading':
         p = d.get('_percent_str', '0%')
+#         s = d.get('_speed_str', 'N/A')
+        # 减少刷屏，只在整10%或者完成时记录
         s = d.get('_speed_str', 'N/A')
         # 减少刷屏，只在整10%或者完成时记录
         # 但为了让用户看到动静，还是实时更新log的最后一样比较好？
@@ -182,7 +212,14 @@ def download_finished(success, error_msg=""):
 def analyze_url(url):
     if not url: return
 
-    log(f"🔍 开始解析链接: {url}")
+    # 没加载完 yt-dlp 时点击也没用
+    if yt_dlp is None:
+        messagebox.showwarning("提示", "核心组件正在后台初始化，请稍后...")
+        return
+    
+    log(f"🔍 正在解析视频信息: {url}")
+    log("⏳ 请稍候，这可能需要几秒钟...")
+    
     options_frame.pack_forget()
 
     def run_analysis():
@@ -190,12 +227,12 @@ def analyze_url(url):
             ydl_opts = {
                 'noplaylist': True,
                 'quiet': True,
+                # 'cookiesfrombrowser': ('safari',), # 移除复杂鉴权
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
             
             video_title = info.get('title', '未知标题')
-            log(f"✅ 解析成功: {video_title}")
             
             formats = info.get('formats', [])
             resolutions = set()
@@ -203,32 +240,43 @@ def analyze_url(url):
                 if f.get('vcodec') != 'none' and f.get('height'):
                     resolutions.add(f['height'])
             
+            # 排序：从高到低
             sorted_res = sorted(list(resolutions), reverse=True)
-            options = ["1. 最高画质 (MP4)"]
-            for r in sorted_res:
-                options.append(f"{r}p (MP4)")
-            options.append("仅音频 (MP3)")
             
-            window.after(0, lambda: update_quality_menu(options, video_title))
+            # 构建带序号的选项列表
+            options = ["1. 最高画质 (最佳效果)"]
+            
+            idx = 2
+            for r in sorted_res:
+                options.append(f"{idx}. {r}p (MP4)")
+                idx += 1
+                
+            options.append(f"{idx}. 仅音频 (MP3)")
+            
+            # 回到主线程更新 UI
+            window.after(0, lambda: update_success(options, video_title))
+            
         except Exception as e:
-            log(f"❌ 解析失败: {e}")
-            window.after(0, lambda: update_quality_menu(None, None))
+            err_msg = str(e)
+            window.after(0, lambda: update_fail(err_msg))
 
     threading.Thread(target=run_analysis).start()
 
-def update_quality_menu(options, title):
-    if options:
-        quality_menu['values'] = options
-        quality_menu.current(0)
-        
-        # 更新标题显示
-        title_label.config(text=f"📺 视频标题：{title}")
-        log("请选择画质和保存路径，然后点击下载。")
-        
-        options_frame.pack(pady=10, fill=tk.X, padx=20)
-    else:
-        log("⚠️ 解析失败，请检查链接或网络。")
-        messagebox.showerror("错误", "无法解析该视频链接。")
+def update_success(options, title):
+    log(f"✅ 解析成功: {title}")
+    quality_menu['values'] = options
+    quality_menu.current(0)
+    
+    # 更新标题显示
+    title_label.config(text=f"📺 视频标题：{title}")
+    log("请选择画质和保存路径，然后点击下载。")
+    
+    options_frame.pack(pady=10, fill=tk.X, padx=20)
+
+def update_fail(err):
+    log(f"❌ 解析失败: {err}")
+    log("提示：可能是网络问题，或该视频有限制。")
+    messagebox.showerror("错误", "无法解析该视频链接。\n请检查网络或链接是否正确。")
 
 # --- 窗口界面布局与主题 ---
 LIGHT_THEME = {
@@ -435,7 +483,10 @@ log_area.pack(fill=tk.BOTH, expand=True)
 
 log("程序已就绪，请粘贴链接或点击按钮开始。")
 
-# 初始化主题
+# 初始化UI主题
 apply_theme()
+
+# 启动后台初始化线程 (加速启动)
+threading.Thread(target=init_app, daemon=True).start()
 
 window.mainloop()
