@@ -39,28 +39,54 @@ API_URL = "https://api.github.com/repos/pk197197/youtube-downloader/releases/lat
 CONFIG_FILE = os.path.expanduser("~/.youtube_downloader_config.json")
 
 
+import ssl
+
+def detect_ffmpeg():
+    """检测 FFmpeg 是否存在，包括 Homebrew 路径"""
+    # 1. 检查环境变量中的 ffmpeg
+    if shutil.which("ffmpeg"):
+        return shutil.which("ffmpeg")
+    
+    # 2. 检查常见 Homebrew/MacPorts 路径
+    common_paths = [
+        "/opt/homebrew/bin/ffmpeg",  # Apple Silicon
+        "/usr/local/bin/ffmpeg",     # Intel
+        os.path.expanduser("~/bin/ffmpeg"),
+        os.path.expanduser("~/Library/Application Support/YouTubeDownloader/bin/ffmpeg")
+    ]
+    
+    for path in common_paths:
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            return path
+            
+    return None
+
 def install_ffmpeg():
     """尝试自动安装 FFmpeg"""
     log("⏳ 正在尝试自动安装 FFmpeg...")
     
-    # 1. 尝试使用 Homebrew
+    # 1. 尝试使用 Homebrew (如果 installed but not link)
+    # 这里我们只尝试运行 install，如果已经安装了 brew 会自动处理
     if shutil.which("brew"):
         log("🍺 检测到 Homebrew，尝试 'brew install ffmpeg'...")
         try:
-            subprocess.check_call(["brew", "install", "ffmpeg"])
+            # 捕获输出防止弹窗
+            subprocess.check_call(["brew", "install", "ffmpeg"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             log("✅ FFmpeg 通过 Homebrew 安装成功！")
             return True
-        except subprocess.CalledProcessError:
-            log("❌ Homebrew 安装失败。")
+        except:
+            # brew 可能会报错如果已经安装，再次尝试检测
+            if detect_ffmpeg():
+                return True
+            log("❌ Homebrew 安装/修复失败。转为下载静态包...")
     
-    # 2. 尝试下载静态构建 (Intel/Apple Silicon Universal usually safer)
-    # 使用 evermeet.cx 的 7z/zip 包
+    # 2. 尝试下载静态构建
     FFMPEG_URL = "https://evermeet.cx/ffmpeg/ffmpeg-6.0.zip" # LTS version
     TARGET_DIR = os.path.expanduser("~/Library/Application Support/YouTubeDownloader/bin")
     TARGET_BIN = os.path.join(TARGET_DIR, "ffmpeg")
     
     if os.path.exists(TARGET_BIN):
-        # 添加到环境变量
+        os.chmod(TARGET_BIN, os.stat(TARGET_BIN).st_mode | stat.S_IEXEC)
         os.environ["PATH"] += os.pathsep + TARGET_DIR
         return True
         
@@ -70,10 +96,17 @@ def install_ffmpeg():
             os.makedirs(TARGET_DIR)
             
         zip_path = os.path.join(TARGET_DIR, "ffmpeg.zip")
-        # 添加 User-Agent 防止被拦截
-        opener = urllib.request.build_opener()
+        
+        # 忽略 SSL 证书验证 (防止 Python 环境缺失证书)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        # 添加 User-Agent
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
         opener.addheaders = [('User-Agent', 'Mozilla/5.0')]
         urllib.request.install_opener(opener)
+        
         urllib.request.urlretrieve(FFMPEG_URL, zip_path)
         
         log("📦 正在解压 FFmpeg...")
@@ -83,10 +116,17 @@ def install_ffmpeg():
         # 赋予执行权限
         os.chmod(TARGET_BIN, os.stat(TARGET_BIN).st_mode | stat.S_IEXEC)
         
-        # 清理
-        os.remove(zip_path)
+        # 移除 Gatekeeper 隔离属性 (安全地)
+        try:
+            subprocess.run(["xattr", "-d", "com.apple.quarantine", TARGET_BIN], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except:
+            pass
         
-        # 添加到环境变量 (仅当前进程)
+        # Cleanup
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        
+        # 添加到环境变量
         os.environ["PATH"] += os.pathsep + TARGET_DIR
         log("✅ FFmpeg 静态包安装成功！")
         return True
@@ -112,23 +152,28 @@ def init_app():
     yt_dlp = ydl_module
     log("✅ 核心组件加载完成。")
 
-    # 2. Check FFmpeg (Auto-install if missing)
-    if not shutil.which("ffmpeg"):
+    # 2. 检测 FFmpeg
+    ffmpeg_path = detect_ffmpeg()
+    
+    if ffmpeg_path:
+        ffmpeg_available = True
+        # 如果是手动找到的路径，确保它在 PATH 里，主要是为了 yt-dlp 能找到
+        ffmpeg_dir = os.path.dirname(ffmpeg_path)
+        if ffmpeg_dir not in os.environ["PATH"]:
+             os.environ["PATH"] += os.pathsep + ffmpeg_dir
+        log(f"✅ 检测到 FFmpeg 组件: {ffmpeg_path}")
+    else:
         # 尝试自动安装
         if install_ffmpeg():
-            ffmpeg_available = True
+             ffmpeg_available = True
         else:
-            ffmpeg_available = False
-    else:
-        ffmpeg_available = True
+             ffmpeg_available = False
 
-    if ffmpeg_available:
-        log("✅ 检测到 FFmpeg 组件，支持高清画质合并。")
-    else:
+    if not ffmpeg_available:
         log("⚠️ 未检测到 FFmpeg！")
         log("👉 后果：无法下载 1080p+ 画质，所有视频将自动降级为兼容格式（通常是 720p 或更低）。")
         window.after(1000, lambda: messagebox.showwarning("画质受限警告", 
-            "未检测到 FFmpeg 组件！且自动安装失败。\n\n导致后果：\n1. 无法合并视频流和音频流\n2. 下载的视频画质将受限（通常最高 720p）\n3. 文件大小可能异常小\n\n建议手动安装 Homebrew 后运行 'brew install ffmpeg'。"))
+            "未检测到 FFmpeg 组件！且自动安装失败。\n\n程序将运行在【兼容低画质模式】。\n\n建议手动安装 Homebrew 后运行 'brew install ffmpeg'。"))
 
 def ensure_ytdlp_installed():
     # 如果是打包后的环境，直接跳过检查
