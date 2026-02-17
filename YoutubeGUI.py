@@ -55,6 +55,12 @@ def install_ffmpeg():
         # 赋予执行权限
         os.chmod(TARGET_BIN, os.stat(TARGET_BIN).st_mode | stat.S_IEXEC)
         
+        # 关键：移除 Gatekeeper 隔离属性 (防止 macOS 弹窗 "无法验证开发者")
+        try:
+            subprocess.run(["xattr", "-d", "com.apple.quarantine", TARGET_BIN], stderr=subprocess.DEVNULL)
+        except:
+            pass
+        
         # 清理
         os.remove(zip_path)
         
