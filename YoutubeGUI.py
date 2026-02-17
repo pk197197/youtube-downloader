@@ -276,31 +276,21 @@ def apply_theme():
                 widget.config(bg=theme["bg"])
                 update_widget(widget)
             elif w_type == "Label":
-                widget.config(bg=theme["bg"], fg=theme["fg"])
-            elif w_type == "Button":
-                # macOS 兼容性按钮逻辑：使用 highlightbackground 控制颜色
-                if widget == download_btn:
-                    widget.config(
-                        highlightbackground="#FF0000", # 下载按钮背景
-                        fg="white", # 下载按钮白字更醒目
-                        activebackground="#CC0000"
-                    )
-                elif widget == theme_btn or widget == update_btn:
-                    widget.config(
-                        bg=theme["bg"], 
-                        fg="#999999", 
-                        highlightbackground=theme["bg"],
-                        text=theme["btn_text"] if widget == theme_btn else widget.cget("text")
-                    )
+                # 特殊处理模拟按钮的 Label
+                if widget in [paste_btn, browse_label]:
+                    widget.config(bg=theme["btn_bg"], fg=theme["fg"], padx=20, pady=10)
                 else:
-                    # 通用按钮（如 粘帖、浏览）
-                    widget.config(
-                        highlightbackground=theme["btn_bg"], # 按钮主体色
-                        fg=theme["fg"], 
-                        activebackground=theme["highlight"]
-                    )
-                # 统一设置
-                widget.config(highlightthickness=3, borderwidth=0) 
+                    widget.config(bg=theme["bg"], fg=theme["fg"])
+            elif w_type == "Button":
+                if widget == download_btn:
+                    # 下载按钮使用显眼的红色
+                    widget.config(highlightbackground="#FF0000", fg="black")
+                elif widget in [theme_btn, update_btn]:
+                    widget.config(bg=theme["bg"], fg="#999999", highlightbackground=theme["bg"],
+                                  text=theme["btn_text"] if widget == theme_btn else widget.cget("text"))
+                else:
+                    widget.config(highlightbackground=theme["btn_bg"], fg=theme["fg"])
+                widget.config(highlightthickness=2, borderwidth=0)
             elif w_type == "Entry":
                 widget.config(bg=theme["entry_bg"], fg=theme["fg"], highlightbackground=theme["highlight"], insertbackground=theme["fg"], highlightthickness=1)
             elif "Text" in w_type:
@@ -349,12 +339,12 @@ btn_container = tk.Frame(header_frame)
 btn_container.pack(side=tk.RIGHT)
 
 update_btn = tk.Button(btn_container, text=f"检查更新 {CURRENT_VERSION}", command=check_update, 
-          font=("Arial", 11), relief="flat", highlightthickness=0, borderwidth=0, cursor="hand2")
+          font=("Arial", 11), relief="flat", cursor="hand2")
 update_btn.pack(side=tk.RIGHT)
 
 # 黑暗模式切换按钮
 theme_btn = tk.Button(btn_container, text="🌙 切换黑暗模式", command=toggle_theme,
-          font=("Arial", 11), relief="flat", highlightthickness=0, borderwidth=0, cursor="hand2")
+          font=("Arial", 11), relief="flat", cursor="hand2")
 theme_btn.pack(side=tk.RIGHT, padx=(0, 15))
 
 # 2. 链接输入区域 (模拟卡片式设计)
@@ -370,7 +360,7 @@ entry_frame.pack(pady=5, padx=20, fill=tk.X)
 url_entry = tk.Entry(entry_frame, font=("Arial", 16), relief="flat")
 url_entry.pack(fill=tk.X, ipady=8) # 增加内部高度
 
-def paste_link():
+def paste_link(event=None):
     try:
         content = window.clipboard_get()
         url_entry.delete(0, tk.END)
@@ -379,9 +369,19 @@ def paste_link():
     except:
         pass
 
-paste_btn = tk.Button(content_frame, text="📋 点击这里一键粘贴并解析", command=paste_link, 
-          font=default_font, relief="flat")
+def on_enter(event):
+    event.widget.config(bg=current_theme["highlight"])
+
+def on_leave(event):
+    event.widget.config(bg=current_theme["btn_bg"])
+
+# 使用 Label 模拟按钮，彻底解决 macOS 颜色问题
+paste_btn = tk.Label(content_frame, text="📋 点击这里一键粘贴并解析", font=default_font, 
+                     relief="flat", cursor="hand2", padx=20, pady=10)
 paste_btn.pack(pady=10)
+paste_btn.bind("<Button-1>", paste_link)
+paste_btn.bind("<Enter>", on_enter)
+paste_btn.bind("<Leave>", on_leave)
 
 # 3. 选项区域 (中间部分) - 放在 content_frame 里面
 options_frame = tk.Frame(content_frame)
@@ -406,17 +406,22 @@ path_entry = tk.Entry(path_frame, font=default_font, relief="flat")
 path_entry.insert(0, os.path.expanduser("~/Downloads"))
 path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5)
 
-def choose_path():
+def choose_path(event=None):
     path = filedialog.askdirectory()
     if path:
         path_entry.delete(0, tk.END)
         path_entry.insert(0, path)
 
-tk.Button(path_frame, text="📂 浏览...", command=choose_path, font=default_font).pack(side=tk.RIGHT, padx=(5, 0))
+# 同样使用 Label 模拟浏览按钮
+browse_label = tk.Label(path_frame, text="📂 浏览...", font=default_font, cursor="hand2", padx=10)
+browse_label.pack(side=tk.RIGHT, padx=(5, 0))
+browse_label.bind("<Button-1>", choose_path)
+browse_label.bind("<Enter>", on_enter)
+browse_label.bind("<Leave>", on_leave)
 
-# 4. 下载按钮
+# 4. 下载按钮 (保持 Button，但确保颜色正确)
 download_btn = tk.Button(options_frame, text="立即下载", command=start_download, 
-                         bg="#FF0000", fg="black", font=("Arial", 18, "bold"), height=2) 
+                         font=("Arial", 18, "bold"), height=2) 
 download_btn.pack(pady=30, padx=30, fill=tk.X)
 
 # 5. 日志显示区域 (固定在底部)
