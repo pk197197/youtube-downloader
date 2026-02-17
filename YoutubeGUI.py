@@ -7,9 +7,37 @@ import subprocess
 import shutil
 import time
 
+
 # --- 全局变量 ---
 yt_dlp = None
 ffmpeg_available = False
+
+# Crash Handler (Catch-all)
+def handle_missed_exception(exc_type, exc_value, exc_traceback):
+    error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    desktop = os.path.expanduser("~/Desktop")
+    log_file = os.path.join(desktop, "youtube_downloader_crash.txt")
+    try:
+        with open(log_file, "w") as f:
+            f.write(error_msg)
+        # Try to show alert if Tk is alive
+        subprocess.run(['osascript', '-e', f'display notification "Application Crashed! Log saved to Desktop" with title "Error"'])
+    except:
+        pass
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+sys.excepthook = handle_missed_exception
+
+import json
+import urllib.request
+import zipfile
+import stat
+
+CURRENT_VERSION = "v1.1.2"
+UPDATE_URL = "https://github.com/pk197197/youtube-downloader/releases"
+API_URL = "https://api.github.com/repos/pk197197/youtube-downloader/releases/latest"
+CONFIG_FILE = os.path.expanduser("~/.youtube_downloader_config.json")
+
 
 def install_ffmpeg():
     """尝试自动安装 FFmpeg"""
@@ -417,28 +445,17 @@ def apply_theme():
         try: f.config(bg=theme["bg"])
         except: pass
 
+# ... (imports remain)
 window = tk.Tk()
 window.title(f"YouTube 极简下载器 {CURRENT_VERSION}")
-window.geometry("700x1000") # 增加高度，防止内容被遮挡
+window.geometry("700x1000")
 window.minsize(600, 600)
-# window.config(bg=BG_COLOR) # Initial config will be handled by apply_theme
 
-# 尝试调用 macOS 原生 API 实现统一标题栏 (如果可用)
+# 尝试调用 macOS 原生 API 实现统一标题栏
 try:
-    # 这一行代码会让窗口背景延伸到标题栏，实现"沉浸式"效果
     window.tk.call('::tk::unsupported::MacWindowStyle', 'style', window, 'unified')
 except:
     pass
-
-import json
-import urllib.request
-import zipfile
-import stat
-
-CURRENT_VERSION = "v1.1.2"
-UPDATE_URL = "https://github.com/pk197197/youtube-downloader/releases"
-API_URL = "https://api.github.com/repos/pk197197/youtube-downloader/releases/latest"
-CONFIG_FILE = os.path.expanduser("~/.youtube_downloader_config.json")
 
 class ConfigManager:
     @staticmethod
