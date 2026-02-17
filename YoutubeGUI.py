@@ -433,21 +433,35 @@ class UpdateDialog(tk.Toplevel):
         tk.Checkbutton(btn_frame, text="启动时自动检查更新", variable=self.var_auto_check, 
                        command=self.save_auto_check).pack(side=tk.LEFT)
         
-        # 使用 Label 模拟按钮以解决 macOS 颜色显示问题
-        update_label = tk.Label(btn_frame, text="立即更新 🚀", font=("Arial", 12, "bold"), 
-                              bg="#007AFF", fg="white", cursor="hand2", padx=15, pady=6)
-        update_label.pack(side=tk.RIGHT, padx=5)
-        update_label.bind("<Button-1>", lambda e: self.do_update(version_info['html_url']))
+        # 统一按钮样式生成函数
+        def create_btn(parent, text, command, bg_color, fg_color, hover_color):
+            btn = tk.Label(parent, text=text, font=("Arial", 12), 
+                           bg=bg_color, fg=fg_color, cursor="hand2", padx=15, pady=6)
+            btn.pack(side=tk.RIGHT, padx=5)
+            btn.bind("<Button-1>", lambda e: command())
+            
+            def on_enter(e): btn.config(bg=hover_color)
+            def on_leave(e): btn.config(bg=bg_color)
+            btn.bind("<Enter>", on_enter)
+            btn.bind("<Leave>", on_leave)
+            return btn
+
+        # 1. 立即更新 (Primary - Blue)
+        create_btn(btn_frame, "立即更新 🚀", lambda: self.do_update(version_info['html_url']), 
+                   "#007AFF", "white", "#005BB5")
+
+        # 2. 稍后提醒 (Secondary - Light Gray)
+        create_btn(btn_frame, "稍后提醒", self.destroy, 
+                   "#F0F0F0", "#333333", "#E0E0E0")
         
-        # 简单的 Hover 效果
-        def on_enter(e): update_label.config(bg="#005BB5")
-        def on_leave(e): update_label.config(bg="#007AFF")
-        update_label.bind("<Enter>", on_enter)
-        update_label.bind("<Leave>", on_leave)
-        
-        tk.Button(btn_frame, text="稍后提醒", command=self.destroy).pack(side=tk.RIGHT, padx=5)
-        
-        tk.Button(btn_frame, text="跳过此版本", command=lambda: self.skip_version(version_info['tag_name'])).pack(side=tk.RIGHT, padx=5)
+        # 3. 跳过 (Tertiary - Text Only/Red)
+        # 为防止误触，跳过按钮样式做得弱一点
+        skip_btn = tk.Label(btn_frame, text="跳过此版本", font=("Arial", 11, "underline"), 
+                           fg="#999999", cursor="hand2", padx=10, pady=8)
+        skip_btn.pack(side=tk.RIGHT, padx=5)
+        skip_btn.bind("<Button-1>", lambda e: self.skip_version(version_info['tag_name']))
+        skip_btn.bind("<Enter>", lambda e: skip_btn.config(fg="#666666"))
+        skip_btn.bind("<Leave>", lambda e: skip_btn.config(fg="#999999"))
 
     def save_auto_check(self):
         self.config_data['auto_check'] = self.var_auto_check.get()
