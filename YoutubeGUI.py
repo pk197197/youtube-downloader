@@ -433,8 +433,17 @@ class UpdateDialog(tk.Toplevel):
         tk.Checkbutton(btn_frame, text="启动时自动检查更新", variable=self.var_auto_check, 
                        command=self.save_auto_check).pack(side=tk.LEFT)
         
-        tk.Button(btn_frame, text="立即更新 🚀", command=lambda: self.do_update(version_info['html_url']), 
-                  bg="#007AFF", fg="white").pack(side=tk.RIGHT, padx=5)
+        # 使用 Label 模拟按钮以解决 macOS 颜色显示问题
+        update_label = tk.Label(btn_frame, text="立即更新 🚀", font=("Arial", 12, "bold"), 
+                              bg="#007AFF", fg="white", cursor="hand2", padx=15, pady=6)
+        update_label.pack(side=tk.RIGHT, padx=5)
+        update_label.bind("<Button-1>", lambda e: self.do_update(version_info['html_url']))
+        
+        # 简单的 Hover 效果
+        def on_enter(e): update_label.config(bg="#005BB5")
+        def on_leave(e): update_label.config(bg="#007AFF")
+        update_label.bind("<Enter>", on_enter)
+        update_label.bind("<Leave>", on_leave)
         
         tk.Button(btn_frame, text="稍后提醒", command=self.destroy).pack(side=tk.RIGHT, padx=5)
         
