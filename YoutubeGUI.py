@@ -398,7 +398,7 @@ class UpdateDialog(tk.Toplevel):
     def __init__(self, parent, version_info):
         super().__init__(parent)
         self.title("发现新版本")
-        self.geometry("500x400")
+        self.geometry("600x400")
         self.resizable(False, False)
         
         # 居中显示
@@ -454,14 +454,9 @@ class UpdateDialog(tk.Toplevel):
         create_btn(btn_frame, "稍后提醒", self.destroy, 
                    "#F0F0F0", "#333333", "#E0E0E0")
         
-        # 3. 跳过 (Tertiary - Text Only/Red)
-        # 为防止误触，跳过按钮样式做得弱一点
-        skip_btn = tk.Label(btn_frame, text="跳过此版本", font=("Arial", 11, "underline"), 
-                           fg="#999999", cursor="hand2", padx=10, pady=8)
-        skip_btn.pack(side=tk.RIGHT, padx=5)
-        skip_btn.bind("<Button-1>", lambda e: self.skip_version(version_info['tag_name']))
-        skip_btn.bind("<Enter>", lambda e: skip_btn.config(fg="#666666"))
-        skip_btn.bind("<Leave>", lambda e: skip_btn.config(fg="#999999"))
+        # 3. 跳过 (Secondary - Light Gray - Consistent Style)
+        create_btn(btn_frame, "跳过此版本", lambda: self.skip_version(version_info['tag_name']), 
+                   "#F0F0F0", "#333333", "#E0E0E0")
 
     def save_auto_check(self):
         self.config_data['auto_check'] = self.var_auto_check.get()
