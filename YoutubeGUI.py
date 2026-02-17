@@ -1,0 +1,320 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog, scrolledtext
+import threading
+import os
+import sys
+import subprocess
+import shutil
+import time
+
+# --- 自动安装 yt-dlp ---
+def ensure_ytdlp_installed():
+    # 如果是打包后的环境，直接跳过检查
+    if getattr(sys, 'frozen', False):
+        try:
+            import yt_dlp
+            return True
+        except ImportError:
+            messagebox.showerror("错误", "内置的 yt-dlp 库丢失，请重新下载软件。")
+            return False
+
+    global yt_dlp
+    try:
+        import yt_dlp
+        return True
+    except ImportError:
+        print("yt-dlp 未安装，正在尝试自动安装...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp"])
+            import yt_dlp
+            return True
+        except subprocess.CalledProcessError:
+            print("普通安装失败，尝试 --break-system-packages...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp", "--break-system-packages"])
+                import yt_dlp
+                return True
+            except Exception as e:
+                messagebox.showerror("依赖缺失", f"无法自动安装 yt-dlp 库：\n{e}\n请手动运行: pip install yt-dlp --break-system-packages")
+                return False
+        except Exception as e:
+            messagebox.showerror("依赖缺失", f"无法自动安装 yt-dlp 库：\n{e}\n请手动运行: pip install yt-dlp")
+            return False
+
+ensure_ytdlp_installed()
+
+# --- 日志输出 ---
+def log(message):
+    timestamp = time.strftime("%H:%M:%S", time.localtime())
+    full_msg = f"[{timestamp}] {message}\n"
+    window.after(0, lambda: _append_log(full_msg))
+
+def _append_log(msg):
+    log_area.config(state='normal')
+    log_area.insert(tk.END, msg)
+    log_area.see(tk.END) # 自动滚动到底部
+    log_area.config(state='disabled')
+
+# --- 检查 FFmpeg ---
+def check_ffmpeg():
+    return shutil.which("ffmpeg") is not None
+
+def start_download():
+    url = url_entry.get().strip()
+    if not url:
+        messagebox.showwarning("提示", "请先粘贴视频链接！")
+        return
+    
+    quality = quality_var.get()
+    save_path = path_entry.get().strip()
+    if not save_path or not os.path.isdir(save_path):
+        messagebox.showwarning("提示", "请选择有效的保存路径！")
+        return
+    
+    download_btn.config(state=tk.DISABLED, text="下载中...")
+    log("🚀 开始下载任务...")
+
+    thread = threading.Thread(target=run_download_task, args=(url, quality, save_path))
+    thread.start()
+
+def run_download_task(url, quality, save_path):
+    has_ffmpeg = check_ffmpeg()
+    
+    ydl_opts = {
+        'outtmpl': os.path.join(save_path, '%(title)s.%(ext)s'),
+        # 'cookiesfrombrowser': ('safari',), 
+        'merge_output_format': 'mp4',
+        'noplaylist': True, 
+        'progress_hooks': [progress_hook],
+        'logger': MyLogger(), # 捕获 yt-dlp 内部日志
+    }
+    
+    if not has_ffmpeg:
+        log("⚠️ 未检测到FFmpeg，自动切换到兼容模式（单文件下载）")
+        if 'merge_output_format' in ydl_opts:
+            del ydl_opts['merge_output_format']
+
+    if "仅音频" in quality:
+        if has_ffmpeg:
+            ydl_opts.update({
+                'format': 'bestaudio/best',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+            })
+        else:
+             ydl_opts.update({'format': 'bestaudio/best'})
+             window.after(0, lambda: messagebox.showinfo("提示", "未安装FFmpeg，将下载原始音频(m4a/webm)"))
+
+    elif "最高画质" in quality:
+        if has_ffmpeg:
+            ydl_opts.update({'format': 'bestvideo+bestaudio/best'})
+        else:
+            ydl_opts.update({'format': 'best[ext=mp4]/best'})
+
+    elif "标准画质" in quality and "720p" in quality:
+        if has_ffmpeg:
+            ydl_opts.update({'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]'})
+        else:
+            ydl_opts.update({'format': 'best[height<=720][ext=mp4]/best[height<=720]'})
+
+    elif "(" in quality and ")" in quality: 
+        try:
+            res = quality.split("p")[0].strip()
+            if res.isdigit():
+                 if has_ffmpeg:
+                    ydl_opts.update({'format': f'bestvideo[height<={res}]+bestaudio/best[height<={res}]'})
+                 else:
+                    ydl_opts.update({'format': f'best[height<={res}][ext=mp4]'})
+        except:
+            pass 
+
+    try:
+        log("正在连接下载服务器...")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        
+        window.after(0, lambda: download_finished(True))
+    except Exception as e:
+        log(f"❌ 下载发生异常: {str(e)}")
+        window.after(0, lambda: download_finished(False, str(e)))
+
+class MyLogger:
+    def debug(self, msg):
+        if not msg.startswith('[debug] '):
+            # log(f"[内部] {msg}")
+            pass
+    def warning(self, msg):
+        log(f"⚠️ {msg}")
+    def error(self, msg):
+        log(f"❌ {msg}")
+
+def progress_hook(d):
+    global last_percent
+    if d['status'] == 'downloading':
+        p = d.get('_percent_str', '0%')
+        s = d.get('_speed_str', 'N/A')
+        # 减少刷屏，只在整10%或者完成时记录
+        # 但为了让用户看到动静，还是实时更新log的最后一样比较好？
+        # 这里我们就简单地每一段时间log一次，或者直接只更新Label，log里只记关键节点
+        # 用户的需求是debug，所以最好详细一点
+        # 这里用 window.after 更新到 log 可能会太快导致界面卡顿，所以只记录关键节点
+        pass 
+        # 实时速度还是显示在状态栏比较好，log里记录 milestones
+    elif d['status'] == 'finished':
+        log("✅ 文件下载完成，正在进行后期处理（合并/转码）...")
+
+def download_finished(success, error_msg=""):
+    download_btn.config(state=tk.NORMAL, text="立即下载")
+    if success:
+        log("🎉 所有任务执行成功！")
+        messagebox.showinfo("成功", "视频下载完成！")
+        try:
+            subprocess.call(["open", path_entry.get()])
+        except:
+            pass
+    else:
+        log("❌ 任务失败")
+        messagebox.showerror("错误", f"下载出错了：{error_msg}")
+
+def analyze_url(url):
+    if not url: return
+
+    log(f"🔍 开始解析链接: {url}")
+    options_frame.pack_forget()
+
+    def run_analysis():
+        try:
+            ydl_opts = {
+                'noplaylist': True,
+                'quiet': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+            
+            video_title = info.get('title', '未知标题')
+            log(f"✅ 解析成功: {video_title}")
+            
+            formats = info.get('formats', [])
+            resolutions = set()
+            for f in formats:
+                if f.get('vcodec') != 'none' and f.get('height'):
+                    resolutions.add(f['height'])
+            
+            sorted_res = sorted(list(resolutions), reverse=True)
+            options = ["1. 最高画质 (MP4)"]
+            for r in sorted_res:
+                options.append(f"{r}p (MP4)")
+            options.append("仅音频 (MP3)")
+            
+            window.after(0, lambda: update_quality_menu(options, video_title))
+        except Exception as e:
+            log(f"❌ 解析失败: {e}")
+            window.after(0, lambda: update_quality_menu(None, None))
+
+    threading.Thread(target=run_analysis).start()
+
+def update_quality_menu(options, title):
+    if options:
+        quality_menu['values'] = options
+        quality_menu.current(0)
+        
+        # 更新标题显示
+        title_label.config(text=f"📺 视频标题：{title}")
+        log("请选择画质和保存路径，然后点击下载。")
+        
+        options_frame.pack(pady=10, fill=tk.X, padx=20)
+    else:
+        log("⚠️ 解析失败，请检查链接或网络。")
+        messagebox.showerror("错误", "无法解析该视频链接。")
+
+# --- 窗口界面布局 ---
+window = tk.Tk()
+window.title("YouTube 极简下载器 v1.1")
+window.geometry("700x700")
+window.minsize(600, 600)
+
+default_font = ("Arial", 14)
+title_font = ("Arial", 28, "bold")
+label_font = ("Arial", 16)
+window.option_add('*TCombobox*Listbox.font', default_font)
+
+import webbrowser
+
+CURRENT_VERSION = "v1.1"
+UPDATE_URL = "https://github.com/your-repo/releases" # 这里替换成你的发布页地址
+
+def check_update():
+    """打开浏览器前往下载页面"""
+    if messagebox.askyesno("检查更新", f"当前版本: {CURRENT_VERSION}\n是否打开下载页面查看新版本？"):
+        webbrowser.open(UPDATE_URL)
+
+# ... (rest of the code)
+
+# 1. 标题
+header_frame = tk.Frame(window)
+header_frame.pack(pady=20)
+tk.Label(header_frame, text="YouTube 极简下载器", font=title_font).pack(side=tk.LEFT)
+tk.Button(header_frame, text=f"{CURRENT_VERSION}", command=check_update, font=("Arial", 10), bg="#f0f0f0").pack(side=tk.LEFT, padx=10, anchor="s")
+
+# 2. 链接输入框
+tk.Label(window, text="第一步：在此粘贴视频链接", font=label_font).pack(pady=(10, 5))
+url_entry = tk.Entry(window, font=default_font)
+url_entry.pack(pady=5, padx=50, fill=tk.X)
+
+def paste_link():
+    try:
+        content = window.clipboard_get()
+        url_entry.delete(0, tk.END)
+        url_entry.insert(0, content)
+        analyze_url(content)
+    except:
+        pass
+
+tk.Button(window, text="📋 点击这里一键粘贴并解析", command=paste_link, font=default_font, bg="#E0E0E0").pack(pady=5)
+
+# 3. 选项区域
+options_frame = tk.Frame(window)
+
+# 3.0 视频标题显示
+title_label = tk.Label(options_frame, text="视频标题：...", font=("Arial", 14, "bold"), fg="#333333", wraplength=550)
+title_label.pack(pady=(10, 10))
+
+# 3.1 画质/格式选择
+tk.Label(options_frame, text="第二步：选择画质/格式", font=label_font).pack(pady=(5, 5))
+quality_var = tk.StringVar()
+quality_menu = ttk.Combobox(options_frame, textvariable=quality_var, state="readonly", font=default_font)
+quality_menu.pack(pady=5, padx=30, fill=tk.X)
+
+# 3.2 保存路径选择
+tk.Label(options_frame, text="第三步：保存位置", font=label_font).pack(pady=(15, 5))
+path_frame = tk.Frame(options_frame)
+path_frame.pack(pady=5, padx=30, fill=tk.X)
+
+path_entry = tk.Entry(path_frame, font=default_font)
+path_entry.insert(0, os.path.expanduser("~/Downloads"))
+path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+def choose_path():
+    path = filedialog.askdirectory()
+    if path:
+        path_entry.delete(0, tk.END)
+        path_entry.insert(0, path)
+
+tk.Button(path_frame, text="📂 浏览...", command=choose_path, font=default_font).pack(side=tk.RIGHT, padx=(5, 0))
+
+# 4. 下载按钮
+download_btn = tk.Button(options_frame, text="立即下载", command=start_download, 
+                         bg="#FF0000", fg="black", font=("Arial", 18, "bold"), height=2)
+download_btn.pack(pady=30, padx=30, fill=tk.X)
+
+# 5. 日志显示区域 (替代原来的 status_label)
+tk.Label(window, text="运行日志 / 进度：", font=("Arial", 12)).pack(pady=(20, 5), anchor="w", padx=50)
+log_area = scrolledtext.ScrolledText(window, height=8, font=("Courier", 12), state='disabled')
+log_area.pack(pady=5, padx=50, fill=tk.BOTH, expand=True)
+
+log("程序已就绪，请粘贴链接或点击按钮开始。")
+
+window.mainloop()
