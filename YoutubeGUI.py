@@ -326,7 +326,7 @@ window.option_add('*TCombobox*Listbox.font', default_font)
 
 import webbrowser
 
-CURRENT_VERSION = "v1.1"
+CURRENT_VERSION = "v1.1.1"
 UPDATE_URL = "https://github.com/pk197197/youtube-downloader/releases" # 更新为真实地址
 
 def check_update():
