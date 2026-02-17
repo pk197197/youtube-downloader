@@ -26,6 +26,7 @@ def build_app():
     # --clean: 清理缓存
     cmd = [
         "pyinstaller",
+        "--noconfirm",
         "--noconsole",
         "--windowed",
         "--onefile",

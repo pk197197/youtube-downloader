@@ -11,6 +11,61 @@ import time
 yt_dlp = None
 ffmpeg_available = False
 
+def install_ffmpeg():
+    """尝试自动安装 FFmpeg"""
+    log("⏳ 正在尝试自动安装 FFmpeg...")
+    
+    # 1. 尝试使用 Homebrew
+    if shutil.which("brew"):
+        log("🍺 检测到 Homebrew，尝试 'brew install ffmpeg'...")
+        try:
+            subprocess.check_call(["brew", "install", "ffmpeg"])
+            log("✅ FFmpeg 通过 Homebrew 安装成功！")
+            return True
+        except subprocess.CalledProcessError:
+            log("❌ Homebrew 安装失败。")
+    
+    # 2. 尝试下载静态构建 (Intel/Apple Silicon Universal usually safer)
+    # 使用 evermeet.cx 的 7z/zip 包
+    FFMPEG_URL = "https://evermeet.cx/ffmpeg/ffmpeg-6.0.zip" # LTS version
+    TARGET_DIR = os.path.expanduser("~/Library/Application Support/YouTubeDownloader/bin")
+    TARGET_BIN = os.path.join(TARGET_DIR, "ffmpeg")
+    
+    if os.path.exists(TARGET_BIN):
+        # 添加到环境变量
+        os.environ["PATH"] += os.pathsep + TARGET_DIR
+        return True
+        
+    log(f"⬇️ 正在下载 FFmpeg 静态包 (约 20MB)...")
+    try:
+        if not os.path.exists(TARGET_DIR):
+            os.makedirs(TARGET_DIR)
+            
+        zip_path = os.path.join(TARGET_DIR, "ffmpeg.zip")
+        # 添加 User-Agent 防止被拦截
+        opener = urllib.request.build_opener()
+        opener.addheaders = [('User-Agent', 'Mozilla/5.0')]
+        urllib.request.install_opener(opener)
+        urllib.request.urlretrieve(FFMPEG_URL, zip_path)
+        
+        log("📦 正在解压 FFmpeg...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(TARGET_DIR)
+            
+        # 赋予执行权限
+        os.chmod(TARGET_BIN, os.stat(TARGET_BIN).st_mode | stat.S_IEXEC)
+        
+        # 清理
+        os.remove(zip_path)
+        
+        # 添加到环境变量 (仅当前进程)
+        os.environ["PATH"] += os.pathsep + TARGET_DIR
+        log("✅ FFmpeg 静态包安装成功！")
+        return True
+    except Exception as e:
+        log(f"❌ FFmpeg 自动安装失败: {e}")
+        return False
+
 # 调整 init_app 增加静默检查
 def init_app():
     global yt_dlp, ffmpeg_available
@@ -29,15 +84,23 @@ def init_app():
     yt_dlp = ydl_module
     log("✅ 核心组件加载完成。")
 
-    # 2. 检查 FFmpeg
-    ffmpeg_available = shutil.which("ffmpeg") is not None
+    # 2. Check FFmpeg (Auto-install if missing)
+    if not shutil.which("ffmpeg"):
+        # 尝试自动安装
+        if install_ffmpeg():
+            ffmpeg_available = True
+        else:
+            ffmpeg_available = False
+    else:
+        ffmpeg_available = True
+
     if ffmpeg_available:
         log("✅ 检测到 FFmpeg 组件，支持高清画质合并。")
     else:
         log("⚠️ 未检测到 FFmpeg！")
         log("👉 后果：无法下载 1080p+ 画质，所有视频将自动降级为兼容格式（通常是 720p 或更低）。")
         window.after(1000, lambda: messagebox.showwarning("画质受限警告", 
-            "未检测到 FFmpeg 组件！\n\n导致后果：\n1. 无法合并视频流和音频流\n2. 下载的视频画质将受限（通常最高 720p）\n3. 文件大小可能异常小\n\n建议安装 FFmpeg 以解锁 1080p/4k 画质。"))
+            "未检测到 FFmpeg 组件！且自动安装失败。\n\n导致后果：\n1. 无法合并视频流和音频流\n2. 下载的视频画质将受限（通常最高 720p）\n3. 文件大小可能异常小\n\n建议手动安装 Homebrew 后运行 'brew install ffmpeg'。"))
 
 def ensure_ytdlp_installed():
     # 如果是打包后的环境，直接跳过检查
@@ -355,7 +418,7 @@ def apply_theme():
         except: pass
 
 window = tk.Tk()
-window.title("YouTube 极简下载器 v1.1.1")
+window.title(f"YouTube 极简下载器 {CURRENT_VERSION}")
 window.geometry("700x1000") # 增加高度，防止内容被遮挡
 window.minsize(600, 600)
 # window.config(bg=BG_COLOR) # Initial config will be handled by apply_theme
@@ -369,6 +432,8 @@ except:
 
 import json
 import urllib.request
+import zipfile
+import stat
 
 CURRENT_VERSION = "v1.1.2"
 UPDATE_URL = "https://github.com/pk197197/youtube-downloader/releases"
