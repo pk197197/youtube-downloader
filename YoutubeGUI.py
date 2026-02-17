@@ -230,16 +230,87 @@ def update_quality_menu(options, title):
         log("⚠️ 解析失败，请检查链接或网络。")
         messagebox.showerror("错误", "无法解析该视频链接。")
 
-# --- 窗口界面布局 ---
-BG_COLOR = "#FFFFFF" # 使用纯白背景，与 macOS 标题栏融合
-ENTRY_BG = "#FFFFFF"
-BUTTON_BG = "#F0F0F0" # 按钮稍微灰一点以区分
+# --- 窗口界面布局与主题 ---
+LIGHT_THEME = {
+    "bg": "#FFFFFF",
+    "fg": "#333333",
+    "entry_bg": "#FFFFFF",
+    "btn_bg": "#F0F0F0",
+    "highlight": "#CCCCCC",
+    "log_bg": "#FFFFFF",
+    "btn_text": "🌙 切换黑暗模式"
+}
+
+DARK_THEME = {
+    "bg": "#1E1E1E",
+    "fg": "#EEEEEE",
+    "entry_bg": "#2D2D2D",
+    "btn_bg": "#3D3D3D",
+    "highlight": "#444444",
+    "log_bg": "#2D2D2D",
+    "btn_text": "☀️ 切换明亮模式"
+}
+
+current_theme = LIGHT_THEME # 默认明亮
+
+def toggle_theme():
+    global current_theme
+    current_theme = DARK_THEME if current_theme == LIGHT_THEME else LIGHT_THEME
+    apply_theme()
+
+def apply_theme():
+    theme = current_theme
+    window.config(bg=theme["bg"])
+    
+    # ttk Style for Combobox
+    s = ttk.Style()
+    s.theme_use('clam') # 'clam' theme is more customizable
+    s.configure('TCombobox', fieldbackground=theme["entry_bg"], background=theme["btn_bg"], foreground=theme["fg"], selectbackground=theme["btn_bg"], selectforeground=theme["fg"])
+    s.map('TCombobox', fieldbackground=[('readonly', theme["entry_bg"])], background=[('readonly', theme["btn_bg"])])
+    
+    # 递归更新所有支持的主体部件
+    def update_widget(parent):
+        for widget in parent.winfo_children():
+            w_type = widget.winfo_class()
+            
+            if w_type == "Frame":
+                widget.config(bg=theme["bg"])
+                update_widget(widget)
+            elif w_type == "Label":
+                # 排除一些特殊颜色的 Label (如果以后有)
+                widget.config(bg=theme["bg"], fg=theme["fg"])
+            elif w_type == "Button":
+                # 下载按钮由于是红色的，需要特殊处理
+                if widget == download_btn:
+                    widget.config(highlightbackground=theme["bg"])
+                elif widget == theme_btn:
+                    widget.config(text=theme["btn_text"], bg=theme["bg"], fg="#999999", activebackground=theme["bg"])
+                elif widget == update_btn:
+                    widget.config(bg=theme["bg"], fg="#999999", activebackground=theme["bg"])
+                else:
+                    widget.config(bg=theme["btn_bg"], highlightbackground=theme["bg"], fg=theme["fg"]) # Default button colors
+            elif w_type == "Entry":
+                widget.config(bg=theme["entry_bg"], fg=theme["fg"], highlightbackground=theme["highlight"], insertbackground=theme["fg"])
+            elif w_type == "TCombobox":
+                # Handled by ttk.Style above
+                pass 
+            elif "Text" in w_type: # ScrolledText
+                widget.config(bg=theme["log_bg"], fg=theme["fg"], highlightbackground=theme["highlight"])
+
+    update_widget(window)
+    # 特殊部件由于嵌套原因，手动补一下
+    log_frame.config(bg=theme["bg"])
+    header_frame.config(bg=theme["bg"])
+    content_frame.config(bg=theme["bg"])
+    entry_frame.config(bg=theme["bg"])
+    options_frame.config(bg=theme["bg"])
+    path_frame.config(bg=theme["bg"])
 
 window = tk.Tk()
 window.title("YouTube 极简下载器 v1.1")
 window.geometry("700x1000") # 增加高度，防止内容被遮挡
 window.minsize(600, 600)
-window.config(bg=BG_COLOR)
+# window.config(bg=BG_COLOR) # Initial config will be handled by apply_theme
 
 # 尝试调用 macOS 原生 API 实现统一标题栏 (如果可用)
 try:
@@ -264,28 +335,33 @@ def check_update():
         webbrowser.open(UPDATE_URL)
 
 # 1. 顶部区域 (留白与功能按钮)
-header_frame = tk.Frame(window, bg=BG_COLOR)
+header_frame = tk.Frame(window)
 header_frame.pack(pady=(40, 20), fill=tk.X, padx=30) 
 
-# 将更新按钮放在右上角，或者居中更简洁
-# 这里我们做一个极其简洁的设计，只有右上角一个小按钮
-update_btn = tk.Button(header_frame, text=f"检查更新 {CURRENT_VERSION}", command=check_update, 
-          font=("Arial", 11), bg=BG_COLOR, fg="#999999", 
-          relief="flat", activebackground=BG_COLOR, highlightthickness=0, borderwidth=0, cursor="hand2")
+# 右上角功能按钮组
+btn_container = tk.Frame(header_frame)
+btn_container.pack(side=tk.RIGHT)
+
+update_btn = tk.Button(btn_container, text=f"检查更新 {CURRENT_VERSION}", command=check_update, 
+          font=("Arial", 11), relief="flat", highlightthickness=0, borderwidth=0, cursor="hand2")
 update_btn.pack(side=tk.RIGHT)
 
+# 黑暗模式切换按钮
+theme_btn = tk.Button(btn_container, text="🌙 切换黑暗模式", command=toggle_theme,
+          font=("Arial", 11), relief="flat", highlightthickness=0, borderwidth=0, cursor="hand2")
+theme_btn.pack(side=tk.RIGHT, padx=(0, 15))
+
 # 2. 链接输入区域 (模拟卡片式设计)
-content_frame = tk.Frame(window, bg=BG_COLOR)
+content_frame = tk.Frame(window)
 content_frame.pack(fill=tk.BOTH, expand=True, padx=40)
 
-tk.Label(content_frame, text="在此粘贴视频链接", font=("Arial", 24, "bold"), bg=BG_COLOR, fg="#333333").pack(pady=(20, 15))
+tk.Label(content_frame, text="在此粘贴视频链接", font=("Arial", 24, "bold")).pack(pady=(20, 15))
 
-# 使用 Frame 来做边框效果，或者直接用 Entry 的 highlight
-entry_frame = tk.Frame(content_frame, bg=BG_COLOR)
+# 使用 Frame 来做边框效果
+entry_frame = tk.Frame(content_frame)
 entry_frame.pack(pady=5, padx=20, fill=tk.X)
 
-url_entry = tk.Entry(entry_frame, font=("Arial", 16), bg=ENTRY_BG, fg="black", 
-                     highlightbackground="#CCCCCC", highlightthickness=1, relief="flat", insertbackground="black")
+url_entry = tk.Entry(entry_frame, font=("Arial", 16), relief="flat")
 url_entry.pack(fill=tk.X, ipady=8) # 增加内部高度
 
 def paste_link():
@@ -298,30 +374,29 @@ def paste_link():
         pass
 
 paste_btn = tk.Button(content_frame, text="📋 点击这里一键粘贴并解析", command=paste_link, 
-          font=default_font, bg=BUTTON_BG, highlightbackground=BG_COLOR, relief="flat")
+          font=default_font, relief="flat")
 paste_btn.pack(pady=10)
 
 # 3. 选项区域 (中间部分) - 放在 content_frame 里面
-options_frame = tk.Frame(content_frame, bg=BG_COLOR)
-# 注意：options_frame 在 analyze_url 中会被 pack，这里只需要保留定义
+options_frame = tk.Frame(content_frame)
 # 注意：options_frame 在 analyze_url 中会被 pack，这里只需要保留定义
 
 # 3.0 视频标题显示
-title_label = tk.Label(options_frame, text="视频标题：...", font=("Arial", 14, "bold"), fg="#333333", bg=BG_COLOR, wraplength=550)
+title_label = tk.Label(options_frame, text="视频标题：...", font=("Arial", 14, "bold"), wraplength=550)
 title_label.pack(pady=(10, 10))
 
 # 3.1 画质/格式选择
-tk.Label(options_frame, text="第二步：选择画质/格式", font=label_font, bg=BG_COLOR, fg="#333333").pack(pady=(5, 5))
+tk.Label(options_frame, text="第二步：选择画质/格式", font=label_font).pack(pady=(5, 5))
 quality_var = tk.StringVar()
 quality_menu = ttk.Combobox(options_frame, textvariable=quality_var, state="readonly", font=default_font)
 quality_menu.pack(pady=5, padx=30, fill=tk.X, ipady=5)
 
 # 3.2 保存路径选择
-tk.Label(options_frame, text="第三步：保存位置", font=label_font, bg=BG_COLOR, fg="#333333").pack(pady=(15, 5))
-path_frame = tk.Frame(options_frame, bg=BG_COLOR)
+tk.Label(options_frame, text="第三步：保存位置", font=label_font).pack(pady=(15, 5))
+path_frame = tk.Frame(options_frame)
 path_frame.pack(pady=5, padx=30, fill=tk.X)
 
-path_entry = tk.Entry(path_frame, font=default_font, bg=ENTRY_BG, highlightbackground="#CCCCCC", highlightthickness=1, relief="flat")
+path_entry = tk.Entry(path_frame, font=default_font, relief="flat")
 path_entry.insert(0, os.path.expanduser("~/Downloads"))
 path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5)
 
@@ -331,23 +406,25 @@ def choose_path():
         path_entry.delete(0, tk.END)
         path_entry.insert(0, path)
 
-tk.Button(path_frame, text="📂 浏览...", command=choose_path, font=default_font, highlightbackground=BG_COLOR).pack(side=tk.RIGHT, padx=(5, 0))
+tk.Button(path_frame, text="📂 浏览...", command=choose_path, font=default_font).pack(side=tk.RIGHT, padx=(5, 0))
 
 # 4. 下载按钮
 download_btn = tk.Button(options_frame, text="立即下载", command=start_download, 
-                         bg="#FF0000", fg="black", font=("Arial", 18, "bold"), height=2, 
-                         highlightbackground=BG_COLOR) # Mac上按钮背景可能无效，主要靠 fg
+                         bg="#FF0000", fg="black", font=("Arial", 18, "bold"), height=2) 
 download_btn.pack(pady=30, padx=30, fill=tk.X)
 
 # 5. 日志显示区域 (固定在底部)
-log_frame = tk.Frame(window, bg=BG_COLOR)
+log_frame = tk.Frame(window)
 log_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, padx=20, pady=20)
 
-tk.Label(log_frame, text="运行日志 / 进度：", font=("Arial", 12), bg=BG_COLOR).pack(anchor="w", pady=(0, 5))
+tk.Label(log_frame, text="运行日志 / 进度：", font=("Arial", 12)).pack(anchor="w", pady=(0, 5))
 log_area = scrolledtext.ScrolledText(log_frame, height=8, font=("Courier", 12), state='disabled', 
-                                     bg="#FFFFFF", relief="flat", highlightbackground="#CCCCCC", highlightthickness=1)
+                                     relief="flat", highlightthickness=1)
 log_area.pack(fill=tk.BOTH, expand=True)
 
 log("程序已就绪，请粘贴链接或点击按钮开始。")
+
+# 初始化主题
+apply_theme()
 
 window.mainloop()
