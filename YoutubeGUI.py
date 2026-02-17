@@ -11,9 +11,13 @@ import time
 yt_dlp = None
 ffmpeg_available = False
 
-# --- 异步初始化 ---
+# 调整 init_app 增加静默检查
 def init_app():
     global yt_dlp, ffmpeg_available
+    
+    # 0. 静默检查更新
+    threading.Thread(target=check_update_silent).start()
+    
     log("正在初始化核心组件...")
     
     # 1. 检查/安装 yt-dlp
@@ -363,6 +367,124 @@ try:
 except:
     pass
 
+import json
+import urllib.request
+
+CURRENT_VERSION = "v1.1.2"
+UPDATE_URL = "https://github.com/pk197197/youtube-downloader/releases"
+API_URL = "https://api.github.com/repos/pk197197/youtube-downloader/releases/latest"
+CONFIG_FILE = os.path.expanduser("~/.youtube_downloader_config.json")
+
+class ConfigManager:
+    @staticmethod
+    def load():
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, 'r') as f:
+                    return json.load(f)
+            except:
+                pass
+        return {"skipped_version": "", "auto_check": True}
+
+    @staticmethod
+    def save(config):
+        try:
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(config, f)
+        except:
+            pass
+
+class UpdateDialog(tk.Toplevel):
+    def __init__(self, parent, version_info):
+        super().__init__(parent)
+        self.title("发现新版本")
+        self.geometry("500x400")
+        self.resizable(False, False)
+        
+        # 居中显示
+        self.update_idletasks()
+        width = self.winfo_width()
+        height = self.winfo_height()
+        x = (self.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.winfo_screenheight() // 2) - (height // 2)
+        self.geometry(f"+{x}+{y}")
+
+        # 内容布局
+        tk.Label(self, text=f"发现新版本: {version_info['tag_name']}", font=("Arial", 16, "bold")).pack(pady=(20, 10))
+        tk.Label(self, text=f"当前版本: {CURRENT_VERSION}", fg="gray").pack()
+        
+        # 更新日志区域
+        text_frame = tk.Frame(self)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        text_area = scrolledtext.ScrolledText(text_frame, height=10, font=("Arial", 12))
+        text_area.pack(fill=tk.BOTH, expand=True)
+        text_area.insert(tk.END, version_info.get('body', '暂无更新日志'))
+        text_area.config(state='disabled')
+        
+        # 按钮区域
+        btn_frame = tk.Frame(self)
+        btn_frame.pack(fill=tk.X, padx=20, pady=20)
+        
+        self.config_data = ConfigManager.load()
+        self.var_auto_check = tk.BooleanVar(value=self.config_data.get("auto_check", True))
+        
+        # 自动检查勾选框
+        tk.Checkbutton(btn_frame, text="启动时自动检查更新", variable=self.var_auto_check, 
+                       command=self.save_auto_check).pack(side=tk.LEFT)
+        
+        tk.Button(btn_frame, text="立即更新 🚀", command=lambda: self.do_update(version_info['html_url']), 
+                  bg="#007AFF", fg="white").pack(side=tk.RIGHT, padx=5)
+        
+        tk.Button(btn_frame, text="稍后提醒", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+        
+        tk.Button(btn_frame, text="跳过此版本", command=lambda: self.skip_version(version_info['tag_name'])).pack(side=tk.RIGHT, padx=5)
+
+    def save_auto_check(self):
+        self.config_data['auto_check'] = self.var_auto_check.get()
+        ConfigManager.save(self.config_data)
+
+    def skip_version(self, version):
+        self.config_data['skipped_version'] = version
+        ConfigManager.save(self.config_data)
+        self.destroy()
+
+    def do_update(self, url):
+        webbrowser.open(url)
+        self.destroy()
+
+def check_update_silent():
+    config = ConfigManager.load()
+    if not config.get("auto_check", True):
+        return
+
+    try:
+        with urllib.request.urlopen(API_URL, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            latest_version = data['tag_name']
+            
+            # 如果是新版本 且 没有被跳过
+            if latest_version != CURRENT_VERSION and latest_version != config.get("skipped_version"):
+                window.after(0, lambda: UpdateDialog(window, data))
+    except:
+        pass
+
+def check_update_manual():
+    log("正在检查更新...")
+    try:
+        with urllib.request.urlopen(API_URL, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            latest_version = data['tag_name']
+            
+            if latest_version != CURRENT_VERSION:
+                window.after(0, lambda: UpdateDialog(window, data))
+            else:
+                window.after(0, lambda: messagebox.showinfo("检查更新", "当前已是最新版本！"))
+                log("✅ 当前已是最新版本。")
+    except Exception as e:
+        log(f"❌ 检查更新失败: {e}")
+        window.after(0, lambda: messagebox.showerror("错误", "检查更新失败，请检查网络。"))
+
 default_font = ("Arial", 14)
 title_font = ("Arial", 28, "bold")
 label_font = ("Arial", 16, "bold") # 加粗标签
@@ -370,13 +492,9 @@ window.option_add('*TCombobox*Listbox.font', default_font)
 
 import webbrowser
 
-CURRENT_VERSION = "v1.1.1"
-UPDATE_URL = "https://github.com/pk197197/youtube-downloader/releases" # 更新为真实地址
-
+# 替换旧的 check_update
 def check_update():
-    """打开浏览器前往下载页面"""
-    if messagebox.askyesno("检查更新", f"当前版本: {CURRENT_VERSION}\n是否打开下载页面查看新版本？"):
-        webbrowser.open(UPDATE_URL)
+    threading.Thread(target=check_update_manual).start()
 
 # 1. 顶部区域 (留白与功能按钮)
 header_frame = tk.Frame(window)
