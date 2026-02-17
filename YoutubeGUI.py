@@ -417,7 +417,10 @@ class UpdateDialog(tk.Toplevel):
         text_frame = tk.Frame(self)
         text_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
-        text_area = scrolledtext.ScrolledText(text_frame, height=10, font=("Arial", 12))
+        # 增加边框使得未点击时也有轮廓
+        text_area = scrolledtext.ScrolledText(text_frame, height=10, font=("Arial", 12),
+                                            highlightthickness=1, highlightbackground="#CCCCCC", 
+                                            highlightcolor="#CCCCCC", relief="flat", bd=0, padx=10, pady=10)
         text_area.pack(fill=tk.BOTH, expand=True)
         text_area.insert(tk.END, version_info.get('body', '暂无更新日志'))
         text_area.config(state='disabled')
